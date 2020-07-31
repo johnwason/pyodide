@@ -109,7 +109,9 @@ class FigureCanvasWasm(backend_agg.FigureCanvasAgg):
 
             return iodide.output.element("div")
         except ImportError:
-            return document.createElement("div")
+            div = document.createElement('div')
+            document.body.appendChild(div)
+            return div
 
     def show(self):
         # If we've already shown this canvas elsewhere, don't create a new one,

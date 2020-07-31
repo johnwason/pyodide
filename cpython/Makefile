@@ -123,8 +123,8 @@ $(BUILD)/Makefile: $(BUILD)/.patched $(ZLIBBUILD)/.patched $(SQLITEBUILD)/libsql
 		cd $(BUILD); \
 		CONFIG_SITE=./config.site READELF=true LD_RUN_PATH="$(SQLITEBUILD):$(BZIP2BUILD)" emconfigure \
 		  ./configure \
-			  CPPFLAGS="-I$(SQLITEBUILD) -I$(BZIP2BUILD)" \
-			  LDFLAGS="-L$(SQLITEBUILD) -L$(BZIP2BUILD)" \
+			  CPPFLAGS="-I$(SQLITEBUILD) -I$(BZIP2BUILD) -s DISABLE_EXCEPTION_CATCHING=0 -s EXCEPTION_DEBUG=0" \
+			  LDFLAGS="-L$(SQLITEBUILD) -L$(BZIP2BUILD) -s DISABLE_EXCEPTION_CATCHING=0 -s EXCEPTION_DEBUG=0" \
 			  --without-pymalloc \
 			  --disable-shared \
 			  --disable-ipv6 \

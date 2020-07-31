@@ -10,12 +10,17 @@
 #include "python2js.h"
 #include "runpython.h"
 
+PyMODINIT_FUNC
+PyInit__RobotRaconteurPython(void);
+
 int
 main(int argc, char** argv)
 {
   hiwire_setup();
 
   setenv("PYTHONHOME", "/", 0);
+
+  PyImport_AppendInittab("_RobotRaconteurPython",PyInit__RobotRaconteurPython);
 
   Py_InitializeEx(0);
 

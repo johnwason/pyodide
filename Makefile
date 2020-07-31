@@ -21,7 +21,7 @@ SHELL := /bin/bash
 CC=emcc
 CXX=em++
 OPTFLAGS=-O3
-CFLAGS=$(OPTFLAGS) -g -I$(PYTHONINCLUDE) -Wno-warn-absolute-paths
+CFLAGS=$(OPTFLAGS) -g -I$(PYTHONINCLUDE) -Wno-warn-absolute-paths -s DISABLE_EXCEPTION_CATCHING=0 -s EXCEPTION_DEBUG=0 --profiling
 CXXFLAGS=$(CFLAGS) -std=c++14
 
 
@@ -31,7 +31,7 @@ LDFLAGS=\
 	$(CPYTHONROOT)/installs/python-$(PYVERSION)/lib/libpython$(PYMINOR).a \
 	$(LZ4LIB) \
 	-s "BINARYEN_METHOD='native-wasm'" \
-	-s TOTAL_MEMORY=10485760 \
+	-s TOTAL_MEMORY=128MB \
 	-s ALLOW_MEMORY_GROWTH=1 \
 	-s MAIN_MODULE=1 \
 	-s EMULATED_FUNCTION_POINTERS=1 \
@@ -50,7 +50,13 @@ LDFLAGS=\
 	--memory-init-file 0 \
 	-s "BINARYEN_TRAP_MODE='clamp'" \
 	-s TEXTDECODER=0 \
-	-s LZ4=1
+	-s LZ4=1 \
+	-s DISABLE_EXCEPTION_CATCHING=0 \
+	-s EXCEPTION_DEBUG=0 \
+	-s WEBSOCKET_DEBUG=0 \
+	-s ASSERTIONS=0 \
+	--profiling \
+	-lwebsocket.js
 
 SIX_ROOT=packages/six/six-1.11.0/build/lib
 SIX_LIBS=$(SIX_ROOT)/six.py
@@ -62,6 +68,12 @@ PARSO_ROOT=packages/parso/parso-0.5.1/parso
 PARSO_LIBS=$(PARSO_ROOT)/__init__.py
 
 SITEPACKAGES=root/lib/python$(PYMINOR)/site-packages
+
+BOOST_DIR=/rr_src/build_boost/boost_1_71_0
+BOOST_LIB_DIR=$(BOOST_DIR)/stage/lib
+
+RR_PYTHON_DIR=/rr_src/build/out/Python
+RR_LIB_DIR=/rr_src/build/out/lib
 
 all: check \
 	build/pyodide.asm.js \
@@ -78,12 +90,23 @@ all: check \
 	echo -e "\nSUCCESS!"
 
 
-build/pyodide.asm.js: src/main.bc src/jsimport.bc src/jsproxy.bc src/js2python.bc \
+build/pyodide.asm.js: src/main.bc $(RR_PYTHON_DIR)/RobotRaconteur/_RobotRaconteurPython.a \
+		$(RR_LIB_DIR)/libRobotRaconteurCore.a \
+		src/jsimport.bc src/jsproxy.bc src/js2python.bc \
 		src/pyimport.bc src/pyproxy.bc src/python2js.bc src/python2js_buffer.bc \
 		src/runpython.bc src/hiwire.bc
 	date +"[%F %T] Building pyodide.asm.js..."
 	[ -d build ] || mkdir build
 	$(CXX) -s EXPORT_NAME="'pyodide'" -o build/pyodide.asm.html $(filter %.bc,$^) \
+		$(RR_PYTHON_DIR)/RobotRaconteur/_RobotRaconteurPython.a \
+		$(RR_LIB_DIR)/libRobotRaconteurCore.a \
+		$(BOOST_LIB_DIR)/libboost_date_time.bc \
+		$(BOOST_LIB_DIR)/libboost_filesystem.bc \
+		$(BOOST_LIB_DIR)/libboost_system.bc \
+		$(BOOST_LIB_DIR)/libboost_regex.bc \
+		$(BOOST_LIB_DIR)/libboost_chrono.bc \
+		$(BOOST_LIB_DIR)/libboost_random.bc \
+		$(BOOST_LIB_DIR)/libboost_program_options.bc \
 		$(LDFLAGS) -s FORCE_FILESYSTEM=1
 	rm build/pyodide.asm.html
 	date +"[%F %T] done building pyodide.asm.js."
@@ -93,7 +116,7 @@ env:
 	env
 
 
-build/pyodide.asm.data: root/.built
+build/pyodide.asm.data: root/.built root/.rrbuilt
 	( \
 		cd build; \
 		python $(FILEPACKAGER) pyodide.asm.data --abi=$(PYODIDE_PACKAGE_ABI) --lz4 --preload ../root/lib@lib --js-output=pyodide.asm.data.js --use-preload-plugins \
@@ -103,13 +126,13 @@ build/pyodide.asm.data: root/.built
 
 build/pyodide_dev.js: src/pyodide.js
 	cp $< $@
-	sed -i -e "s#{{DEPLOY}}#./#g" $@
+	sed -i -e "s#{{DEPLOY}}#/build/#g" $@
 	sed -i -e "s#{{ABI}}#$(PYODIDE_PACKAGE_ABI)#g" $@
 
 
 build/pyodide.js: src/pyodide.js
 	cp $< $@
-	sed -i -e 's#{{DEPLOY}}#https://pyodide-cdn2.iodide.io/v0.15.0/full/#g' $@
+	sed -i -e 's#{{DEPLOY}}#https://robotraconteur.github.io/robotraconteur_pyodide/#g' $@
 
 	sed -i -e "s#{{ABI}}#$(PYODIDE_PACKAGE_ABI)#g" $@
 
