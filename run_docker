@@ -9,6 +9,7 @@ exec docker run \
     -it --rm \
     -v $PWD:/src \
     -v /home/wasonj/pyodide/robotraconteur_pyodide:/rr_src \
+    -v /home/wasonj/pyodide/swig:/swig \
     --user root -e NB_UID=$UID -e NB_GID=$GID \
     ${PYODIDE_DOCKER_IMAGE} \
     /bin/bash

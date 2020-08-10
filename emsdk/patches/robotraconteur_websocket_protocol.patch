@@ -1,0 +1,12 @@
+--- a/emsdk/emscripten/tag-1.38.31/src/library_websocket.js
++++ b/emsdk/emscripten/tag-1.38.31/src/library_websocket.js
+@@ -272,7 +272,7 @@
+ 
+     // TODO: protocols
+     // TODO: createOnMainThread
+-    var socket = new WebSocket(url);
++    var socket = new WebSocket(url,"robotraconteur.robotraconteur.com");
+     socket.binaryType = 'arraybuffer';
+     // TODO: While strictly not necessary, this ID would be good to be unique across all threads to avoid confusion.
+     var socketId = WS.sockets.length;
+     
