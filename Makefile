@@ -21,7 +21,7 @@ SHELL := /bin/bash
 CC=emcc
 CXX=em++
 OPTFLAGS=-O3
-CFLAGS=$(OPTFLAGS) -g -I$(PYTHONINCLUDE) -Wno-warn-absolute-paths -s DISABLE_EXCEPTION_CATCHING=0 -s EXCEPTION_DEBUG=0 --profiling
+CFLAGS=$(OPTFLAGS) -g -I$(PYTHONINCLUDE) -Wno-warn-absolute-paths -s DISABLE_EXCEPTION_CATCHING=0 -s EXCEPTION_DEBUG=0
 CXXFLAGS=$(CFLAGS) -std=c++14
 
 
@@ -55,7 +55,6 @@ LDFLAGS=\
 	-s EXCEPTION_DEBUG=0 \
 	-s WEBSOCKET_DEBUG=0 \
 	-s ASSERTIONS=0 \
-	--profiling \
 	-lwebsocket.js
 
 SIX_ROOT=packages/six/six-1.11.0/build/lib
