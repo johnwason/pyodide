@@ -12,7 +12,7 @@ CPYTHONLIB=$(CPYTHONROOT)/installs/python-$(PYVERSION)/lib/python$(PYMINOR)
 
 CC=emcc
 CXX=em++
-OPTFLAGS=-O2
+OPTFLAGS=-O1
 CFLAGS=\
 	$(OPTFLAGS) \
 	-g \
@@ -21,7 +21,8 @@ CFLAGS=\
 	-Wno-warn-absolute-paths \
 	-Werror=int-conversion \
 	-Werror=incompatible-pointer-types \
-	$(EXTRA_CFLAGS)
+	$(EXTRA_CFLAGS) \
+	-s DISABLE_EXCEPTION_CATCHING=0
 LDFLAGS=\
 	-s BINARYEN_EXTRA_PASSES="--pass-arg=max-func-params@61" \
 	$(OPTFLAGS) \
@@ -44,7 +45,14 @@ LDFLAGS=\
 	-lstdc++ \
 	--memory-init-file 0 \
 	-s LZ4=1 \
-	$(EXTRA_LDFLAGS)
+	$(EXTRA_LDFLAGS) \
+	-s DISABLE_EXCEPTION_CATCHING=0
+
+BOOST_DIR=/rr_src/build_boost/boost_1_75_0
+BOOST_LIB_DIR=$(BOOST_DIR)/stage/lib
+
+RR_PYTHON_DIR=/rr_src/build/out/Python
+RR_LIB_DIR=/rr_src/build/out/lib
 
 all: check \
 	build/pyodide.asm.js \
@@ -68,6 +76,15 @@ build/pyodide.asm.js: \
 	src/core/pyproxy.o \
 	src/core/python2js_buffer.o \
 	src/core/python2js.o \
+	$(RR_LIB_DIR)/libRobotRaconteurCore.a \
+	$(RR_PYTHON_DIR)/RobotRaconteur/_RobotRaconteurPython.a \
+	$(BOOST_LIB_DIR)/libboost_date_time.bc \
+	$(BOOST_LIB_DIR)/libboost_filesystem.bc \
+	$(BOOST_LIB_DIR)/libboost_system.bc \
+	$(BOOST_LIB_DIR)/libboost_regex.bc \
+	$(BOOST_LIB_DIR)/libboost_chrono.bc \
+	$(BOOST_LIB_DIR)/libboost_random.bc \
+	$(BOOST_LIB_DIR)/libboost_program_options.bc \
 	src/pystone.py \
 	src/_testcapi.py \
 	src/webbrowser.py \
@@ -83,7 +100,16 @@ build/pyodide.asm.js: \
 		--preload-file src/pystone.py@/lib/python$(PYMINOR)/pystone.py \
 		--preload-file src/pyodide-py/pyodide@/lib/python$(PYMINOR)/site-packages/pyodide \
 		--exclude-file "*__pycache__*" \
-		--exclude-file "*/test/*"
+		--exclude-file "*/test/*" \
+		$(RR_LIB_DIR)/libRobotRaconteurCore.a \
+		$(BOOST_LIB_DIR)/libboost_date_time.bc \
+		$(BOOST_LIB_DIR)/libboost_filesystem.bc \
+		$(BOOST_LIB_DIR)/libboost_system.bc \
+		$(BOOST_LIB_DIR)/libboost_regex.bc \
+		$(BOOST_LIB_DIR)/libboost_chrono.bc \
+		$(BOOST_LIB_DIR)/libboost_random.bc \
+		$(BOOST_LIB_DIR)/libboost_program_options.bc \
+		-s ASSERTIONS=1
 	date +"[%F %T] done building pyodide.asm.js."
 
 

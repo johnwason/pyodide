@@ -73,6 +73,8 @@ exec docker run \
     -p "$PYODIDE_SYSTEM_PORT":"$PYODIDE_DOCKER_PORT" \
     -it --rm \
     -v $PWD:/src \
+    -v $HOME/pyodide2/robotraconteur_pyodide:/rr_src \
+    -v $HOME/pyodide/swig:/swig \
     --user root -e NB_UID=$UID -e NB_GID=$GID \
     "${PYODIDE_DOCKER_IMAGE}" \
     /bin/bash

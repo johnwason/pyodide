@@ -7,12 +7,12 @@ TOOLSDIR = ROOTDIR / "tools"
 TARGETPYTHON = ROOTDIR / "cpython" / "installs" / "python-3.8.2"
 
 # Leading space so that argparse doesn't think this is a flag
-DEFAULTCFLAGS = " -fPIC"
+DEFAULTCFLAGS = " -fPIC -O1 -s DISABLE_EXCEPTION_CATCHING=0"
 DEFAULTCXXFLAGS = ""
 # fmt: off
 DEFAULTLDFLAGS = " ".join(
     [
-        "-O2",
+        "-O1",
         "-Werror",
         "-s", "EMULATE_FUNCTION_POINTER_CASTS=1",
         "-s",'BINARYEN_EXTRA_PASSES="--pass-arg=max-func-params@61"',
@@ -21,6 +21,7 @@ DEFAULTLDFLAGS = " ".join(
         "--memory-init-file", "0",
         "-s", "LINKABLE=1",
         "-s", "EXPORT_ALL=1",
+        "-s", "DISABLE_EXCEPTION_CATCHING=0"
     ]
 )
 # fmt: on

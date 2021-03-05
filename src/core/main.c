@@ -85,9 +85,14 @@ run_python_simple_inner(char* code)
   }
 }
 
+PyMODINIT_FUNC
+PyInit__RobotRaconteurPython(void);
+
 int
 main(int argc, char** argv)
 {
+  //PyImport_AppendInittab("_RobotRaconteurPython",PyInit__RobotRaconteurPython);
+
   // This exits and prints a message to stderr on failure,
   // no status code to check.
   initialize_python();
