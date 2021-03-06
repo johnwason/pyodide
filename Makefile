@@ -49,10 +49,10 @@ LDFLAGS=\
 	-s "BINARYEN_TRAP_MODE='clamp'" \
 	-s LZ4=1 \
 	-s DISABLE_EXCEPTION_CATCHING=0 \
-	-s EXCEPTION_DEBUG=0
+	-s EXCEPTION_DEBUG=0 \
 	$(EXTRA_LDFLAGS)
 
-BOOST_DIR=/rr_src/build_boost/boost_1_71_0
+BOOST_DIR=/rr_src/build_boost/boost_1_75_0
 BOOST_LIB_DIR=$(BOOST_DIR)/stage/lib
 
 RR_PYTHON_DIR=/rr_src/build/out/Python
@@ -99,6 +99,8 @@ build/pyodide.asm.js: \
 		--preload-file src/pyodide-py/pyodide@/lib/python$(PYMINOR)/site-packages/pyodide \
 		--exclude-file "*__pycache__*" \
 		--exclude-file "*/test/*" \
+		--preload-file $(RR_PYTHON_DIR)/RobotRaconteur@/lib/python$(PYMINOR)/site-packages/RobotRaconteur \
+		--exclude-file $(RR_PYTHON_DIR)/RobotRaconteur/_RobotRaconteurPython* \
 		$(RR_PYTHON_DIR)/RobotRaconteur/_RobotRaconteurPython.a \
 		$(RR_LIB_DIR)/libRobotRaconteurCore.a \
 		$(BOOST_LIB_DIR)/libboost_date_time.bc \
@@ -107,7 +109,8 @@ build/pyodide.asm.js: \
 		$(BOOST_LIB_DIR)/libboost_regex.bc \
 		$(BOOST_LIB_DIR)/libboost_chrono.bc \
 		$(BOOST_LIB_DIR)/libboost_random.bc \
-		$(BOOST_LIB_DIR)/libboost_program_options.bc
+		$(BOOST_LIB_DIR)/libboost_program_options.bc \
+		-lwebsocket.js
 	date +"[%F %T] done building pyodide.asm.js."
 
 
@@ -161,8 +164,8 @@ clean:
 	rm -fr build/*
 	rm -fr src/*.o
 	rm -fr node_modules
-	make -C packages clean
-	echo "The Emsdk, CPython are not cleaned. cd into those directories to do so."
+	#make -C packages clean
+	echo "The Emsdk, CPython, packages are not cleaned. cd into those directories to do so."
 
 clean-all: clean
 	make -C emsdk clean
