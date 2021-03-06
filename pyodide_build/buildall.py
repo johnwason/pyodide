@@ -56,10 +56,10 @@ class Package:
                         "pyodide_build",
                         "buildpkg",
                         str(self.pkgdir / "meta.yaml"),
-                        "--package_abi",
-                        str(args.package_abi),
                         "--cflags",
                         args.cflags,
+                        "--cxxflags",
+                        args.cxxflags,
                         "--ldflags",
                         args.ldflags,
                         "--target",
@@ -72,10 +72,15 @@ class Package:
                     stderr=subprocess.STDOUT,
                 )
 
-        with open(self.pkgdir / "build.log", "r") as f:
-            shutil.copyfileobj(f, sys.stdout)
+        try:
+            p.check_returncode()
+        except subprocess.CalledProcessError:
+            print(f"Error building {self.name}. Printing build logs.")
 
-        p.check_returncode()
+            with open(self.pkgdir / "build.log", "r") as f:
+                shutil.copyfileobj(f, sys.stdout)
+
+            raise
 
         if not self.library:
             shutil.copyfile(
@@ -254,17 +259,18 @@ def make_parser(parser):
         help="Output directory in which to put all built packages",
     )
     parser.add_argument(
-        "--package_abi",
-        type=int,
-        required=True,
-        help="The ABI number for the packages to be built",
-    )
-    parser.add_argument(
         "--cflags",
         type=str,
         nargs="?",
         default=common.DEFAULTCFLAGS,
         help="Extra compiling flags",
+    )
+    parser.add_argument(
+        "--cxxflags",
+        type=str,
+        nargs="?",
+        default=common.DEFAULTCXXFLAGS,
+        help="Extra C++ specific compiling flags",
     )
     parser.add_argument(
         "--ldflags",

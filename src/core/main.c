@@ -1,11 +1,12 @@
 #include <Python.h>
+#include <assert.h>
 #include <emscripten.h>
+#include <stdalign.h>
 
 #include "hiwire.h"
 #include "js2python.h"
 #include "jsimport.h"
 #include "jsproxy.h"
-#include "pyimport.h"
 #include "pyproxy.h"
 #include "python2js.h"
 #include "runpython.h"
@@ -33,7 +34,13 @@ PyInit__RobotRaconteurPython(void);
 int
 main(int argc, char** argv)
 {
-  hiwire_setup();
+  if (alignof(JsRef) != alignof(int)) {
+    FATAL_ERROR("JsRef doesn't have the same alignment as int.");
+  }
+  if (sizeof(JsRef) != sizeof(int)) {
+    FATAL_ERROR("JsRef doesn't have the same size as int.");
+  }
+  TRY_INIT(hiwire);
 
   setenv("PYTHONHOME", "/", 0);
 
@@ -60,7 +67,6 @@ main(int argc, char** argv)
   TRY_INIT(js2python);
   TRY_INIT(JsImport);
   TRY_INIT(JsProxy);
-  TRY_INIT(pyimport);
   TRY_INIT(pyproxy);
   TRY_INIT(python2js);
   TRY_INIT(runpython);
