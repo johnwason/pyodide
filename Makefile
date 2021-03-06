@@ -1,10 +1,11 @@
 PYODIDE_ROOT=$(abspath .)
+
 include Makefile.envs
+
 .PHONY=check
 
-FILEPACKAGER=$(PYODIDE_ROOT)/emsdk/emsdk/fastcomp/emscripten/tools/file_packager.py
+FILEPACKAGER=$$EM_DIR/tools/file_packager.py
 UGLIFYJS=$(PYODIDE_ROOT)/node_modules/.bin/uglifyjs
-LESSC=$(PYODIDE_ROOT)/node_modules/.bin/lessc
 
 CPYTHONROOT=cpython
 CPYTHONLIB=$(CPYTHONROOT)/installs/python-$(PYVERSION)/lib/python$(PYMINOR)
@@ -15,10 +16,19 @@ PYODIDE_CXX=$(PYODIDE_ROOT)/ccache/em++
 CC=emcc
 CXX=em++
 OPTFLAGS=-O2
-CFLAGS=$(OPTFLAGS) -g -I$(PYTHONINCLUDE) -Wno-warn-absolute-paths -Werror=int-conversion -Werror=incompatible-pointer-types -fPIC -s DISABLE_EXCEPTION_CATCHING=0 -s EXCEPTION_DEBUG=0
-
+CFLAGS=\
+	$(OPTFLAGS) \
+	-g \
+	-I$(PYTHONINCLUDE) \
+	-fPIC \
+	-Wno-warn-absolute-paths \
+	-Werror=int-conversion \
+	-Werror=incompatible-pointer-types \
+	-s DISABLE_EXCEPTION_CATCHING=0 \
+	-s EXCEPTION_DEBUG=0 \
+	$(EXTRA_CFLAGS)
 LDFLAGS=\
-	-O2 \
+	$(OPTFLAGS) \
 	-s MODULARIZE=1 \
 	$(CPYTHONROOT)/installs/python-$(PYVERSION)/lib/libpython$(PYMINOR).a \
 	-s TOTAL_MEMORY=10485760 \
@@ -40,14 +50,7 @@ LDFLAGS=\
 	-s LZ4=1 \
 	-s DISABLE_EXCEPTION_CATCHING=0 \
 	-s EXCEPTION_DEBUG=0
-
-JEDI_ROOT=packages/jedi/jedi-0.17.2/jedi
-JEDI_LIBS=$(JEDI_ROOT)/__init__.py
-
-PARSO_ROOT=packages/parso/parso-0.7.1/parso
-PARSO_LIBS=$(PARSO_ROOT)/__init__.py
-
-SITEPACKAGES=root/lib/python$(PYMINOR)/site-packages
+	$(EXTRA_LDFLAGS)
 
 BOOST_DIR=/rr_src/build_boost/boost_1_71_0
 BOOST_LIB_DIR=$(BOOST_DIR)/stage/lib
@@ -59,7 +62,6 @@ all: check \
 	build/pyodide.asm.js \
 	build/pyodide.js \
 	build/console.html \
-	build/renderedhtml.css \
 	build/test.data \
 	build/packages.json \
 	build/test.html \
@@ -68,19 +70,35 @@ all: check \
 	echo -e "\nSUCCESS!"
 
 
-build/pyodide.asm.js: src/core/main.bc src/core/jsimport.bc \
-	        src/core/jsproxy.bc src/core/js2python.bc \
-		src/core/pyproxy.bc \
-		src/core/python2js.bc \
-		src/core/python2js_buffer.bc \
-		src/core/runpython.bc src/core/hiwire.bc \
-		root/.built \
-		$(RR_PYTHON_DIR)/RobotRaconteur/_RobotRaconteurPython.a \
-		$(RR_LIB_DIR)/libRobotRaconteurCore.a
+build/pyodide.asm.js: \
+	src/core/error_handling.o \
+	src/core/hiwire.o \
+	src/core/js2python.o \
+	src/core/jsproxy.o \
+	src/core/keyboard_interrupt.o \
+	src/core/main.o  \
+	src/core/pyproxy.o \
+	src/core/python2js_buffer.o \
+	src/core/python2js.o \
+	src/core/runpython.o \
+	src/pystone.py \
+	src/_testcapi.py \
+	src/webbrowser.py \
+	$(wildcard src/pyodide-py/pyodide/*.py) \
+	$(CPYTHONLIB) \
+	$(RR_PYTHON_DIR)/RobotRaconteur/_RobotRaconteurPython.a \
+	$(RR_LIB_DIR)/libRobotRaconteurCore.a
 	date +"[%F %T] Building pyodide.asm.js..."
 	[ -d build ] || mkdir build
-	$(CXX) -s EXPORT_NAME="'pyodide'" -o build/pyodide.asm.js $(filter %.bc,$^) \
-		$(LDFLAGS) -s FORCE_FILESYSTEM=1 --preload-file root/lib@lib \
+	$(CXX) -s EXPORT_NAME="'pyodide'" -o build/pyodide.asm.js $(filter %.o,$^) \
+		$(LDFLAGS) -s FORCE_FILESYSTEM=1 \
+		--preload-file $(CPYTHONLIB)@/lib/python$(PYMINOR) \
+		--preload-file src/webbrowser.py@/lib/python$(PYMINOR)/webbrowser.py \
+		--preload-file src/_testcapi.py@/lib/python$(PYMINOR)/_testcapi.py \
+		--preload-file src/pystone.py@/lib/python$(PYMINOR)/pystone.py \
+		--preload-file src/pyodide-py/pyodide@/lib/python$(PYMINOR)/site-packages/pyodide \
+		--exclude-file "*__pycache__*" \
+		--exclude-file "*/test/*" \
 		$(RR_PYTHON_DIR)/RobotRaconteur/_RobotRaconteurPython.a \
 		$(RR_LIB_DIR)/libRobotRaconteurCore.a \
 		$(BOOST_LIB_DIR)/libboost_date_time.bc \
@@ -111,9 +129,6 @@ build/console.html: src/templates/console.html
 	sed -i -e 's#{{ PYODIDE_BASE_URL }}#$(PYODIDE_BASE_URL)#g' $@
 
 
-build/renderedhtml.css: src/css/renderedhtml.less $(LESSC)
-	$(LESSC) $< $@
-
 build/webworker.js: src/webworker.js
 	cp $< $@
 	sed -i -e 's#{{ PYODIDE_BASE_URL }}#$(PYODIDE_BASE_URL)#g' $@
@@ -128,10 +143,10 @@ test: all
 
 lint:
 	# check for unused imports, the rest is done by black
-	flake8 --select=F401 src tools pyodide_build benchmark
+	flake8 --select=F401 src tools pyodide_build benchmark conftest.py
 	clang-format-6.0 -output-replacements-xml `find src -type f -regex ".*\.\(c\|h\|js\)"` | (! grep '<replacement ')
 	black --check .
-	mypy --ignore-missing-imports pyodide_build/ src/ packages/micropip/micropip/ packages/*/test*
+	mypy --ignore-missing-imports pyodide_build/ src/ packages/micropip/micropip/ packages/*/test* conftest.py
 
 
 apply-lint:
@@ -143,69 +158,36 @@ benchmark: all
 
 
 clean:
-	rm -fr root
 	rm -fr build/*
-	rm -fr src/*.bc
+	rm -fr src/*.o
 	rm -fr node_modules
 	make -C packages clean
-	make -C packages/jedi clean
-	make -C packages/parso clean
-	make -C packages/libxslt clean
-	make -C packages/libxml clean
-	make -C packages/libiconv clean
-	make -C packages/zlib clean
-	echo "The Emsdk, CPython and CLAPACK are not cleaned. cd into those directories to do so."
+	echo "The Emsdk, CPython are not cleaned. cd into those directories to do so."
 
 clean-all: clean
 	make -C emsdk clean
 	make -C cpython clean
 	rm -fr cpython/build
 
-%.bc: %.c $(CPYTHONLIB) $(wildcard src/**/*.h)
+%.o: %.c $(CPYTHONLIB) $(wildcard src/**/*.h)
 	$(CC) -o $@ -c $< $(CFLAGS) -Isrc/core/
 
 
-build/test.data: $(CPYTHONLIB)
+build/test.data: $(CPYTHONLIB) $(UGLIFYJS)
 	( \
 		cd $(CPYTHONLIB)/test; \
 		find . -type d -name __pycache__ -prune -exec rm -rf {} \; \
 	)
 	( \
 		cd build; \
-		python $(FILEPACKAGER) test.data --lz4 --preload ../$(CPYTHONLIB)/test@/lib/python3.8/test --js-output=test.js --export-name=pyodide._module --exclude __pycache__ \
+		python $(FILEPACKAGER) test.data --lz4 --preload ../$(CPYTHONLIB)/test@/lib/python$(PYMINOR)/test --js-output=test.js --export-name=pyodide._module --exclude __pycache__ \
 	)
 	$(UGLIFYJS) build/test.js -o build/test.js
 
 
-$(UGLIFYJS) $(LESSC): emsdk/emsdk/.complete
-	npm i --no-save uglify-js lessc
-
-root/.built: \
-		$(CPYTHONLIB) \
-		$(JEDI_LIBS) \
-		$(PARSO_LIBS) \
-		src/sitecustomize.py \
-		src/webbrowser.py \
-		src/pyodide-py/ \
-		cpython/remove_modules.txt
-	rm -rf root
-	mkdir -p root/lib
-	cp -r $(CPYTHONLIB) root/lib
-	mkdir -p $(SITEPACKAGES)
-	cp -r $(JEDI_ROOT) $(SITEPACKAGES)
-	cp -r $(PARSO_ROOT) $(SITEPACKAGES)
-	cp src/sitecustomize.py $(SITEPACKAGES)
-	cp src/webbrowser.py root/lib/python$(PYMINOR)
-	cp src/_testcapi.py	root/lib/python$(PYMINOR)
-	cp src/pystone.py root/lib/python$(PYMINOR)
-	cp -r src/pyodide-py/pyodide/ $(SITEPACKAGES)
-	( \
-		cd root/lib/python$(PYMINOR); \
-		rm -fr `cat ../../../cpython/remove_modules.txt`; \
-		rm -fr test; \
-		find . -type d -name __pycache__ -prune -exec rm -rf {} \; \
-	)
-	touch root/.built
+$(UGLIFYJS): emsdk/emsdk/.complete
+	npm i --no-save uglify-js
+	touch -h $(UGLIFYJS)
 
 
 $(PYODIDE_EMCC):
@@ -235,19 +217,6 @@ $(CPYTHONLIB): emsdk/emsdk/.complete $(PYODIDE_EMCC) $(PYODIDE_CXX)
 	make -C $(CPYTHONROOT)
 	date +"[%F %T] done building cpython..."
 
-
-$(JEDI_LIBS): $(CPYTHONLIB)
-	date +"[%F %T] Building jedi..."
-	make -C packages/jedi
-	date +"[%F %T] done building jedi."
-
-
-$(PARSO_LIBS): $(CPYTHONLIB)
-	date +"[%F %T] Building parso..."
-	make -C packages/parso
-	date +"[%F %T] done building parso."
-
-
 build/packages.json: FORCE
 	date +"[%F %T] Building packages..."
 	make -C packages
@@ -265,3 +234,9 @@ check:
 
 minimal :
 	PYODIDE_PACKAGES="micropip" make
+
+debug :
+	EXTRA_CFLAGS="-D DEBUG_F" \
+	EXTRA_LDFLAGS="-s ASSERTIONS=2" \
+	PYODIDE_PACKAGES+="micropip,pyparsing,pytz,packaging,kiwisolver" \
+	make

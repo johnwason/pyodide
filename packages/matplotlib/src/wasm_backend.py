@@ -112,6 +112,8 @@ class FigureCanvasWasm(backend_agg.FigureCanvasAgg):
             div = document.createElement('div')
             document.body.appendChild(div)
             return div
+        # Designed to be overridden by subclasses
+        # return document.createElement("div")
 
     def show(self):
         # If we've already shown this canvas elsewhere, don't create a new one,

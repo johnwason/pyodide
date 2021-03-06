@@ -1,3 +1,7 @@
+#define PY_SSIZE_T_CLEAN
+#include "Python.h"
+
+#include "error_handling.h"
 #include "js2python.h"
 
 #include <emscripten.h>
@@ -34,22 +38,19 @@ _js2python_number(double val)
 PyObject*
 _js2python_none()
 {
-  Py_INCREF(Py_None);
-  return Py_None;
+  Py_RETURN_NONE;
 }
 
 PyObject*
 _js2python_true()
 {
-  Py_INCREF(Py_True);
-  return Py_True;
+  Py_RETURN_TRUE;
 }
 
 PyObject*
 _js2python_false()
 {
-  Py_INCREF(Py_False);
-  return Py_False;
+  Py_RETURN_FALSE;
 }
 
 PyObject*
@@ -62,35 +63,28 @@ _js2python_pyproxy(PyObject* val)
 PyObject*
 _js2python_memoryview(JsRef id)
 {
-  PyObject* jsproxy = JsProxy_cnew(id);
+  PyObject* jsproxy = JsProxy_create(id);
   return PyMemoryView_FromObject(jsproxy);
 }
 
 PyObject*
 _js2python_jsproxy(JsRef id)
 {
-  return JsProxy_cnew(id);
-}
-
-PyObject*
-_js2python_error(JsRef id)
-{
-  return JsProxy_new_error(id);
+  return JsProxy_create(id);
 }
 
 // TODO: Add some meaningful order
-
-EM_JS(PyObject*, __js2python, (JsRef id), {
+EM_JS_REF(PyObject*, __js2python, (JsRef id), {
   function __js2python_string(value)
   {
     // The general idea here is to allocate a Python string and then
     // have Javascript write directly into its buffer.  We first need
     // to determine if is needs to be a 1-, 2- or 4-byte string, since
     // Python handles all 3.
-    var max_code_point = 0;
-    var length = value.length;
-    for (var i = 0; i < value.length; i++) {
-      code_point = value.codePointAt(i);
+    let max_code_point = 0;
+    let length = value.length;
+    for (let i = 0; i < value.length; i++) {
+      let code_point = value.codePointAt(i);
       max_code_point = Math.max(max_code_point, code_point);
       if (code_point > 0xffff) {
         // If we have a code point requiring UTF-16 surrogate pairs, the
@@ -101,16 +95,18 @@ EM_JS(PyObject*, __js2python, (JsRef id), {
       }
     }
 
-    var result = __js2python_allocate_string(length, max_code_point);
-    if (result == 0) {
+    let result = __js2python_allocate_string(length, max_code_point);
+    // clang-format off
+    if (result === 0) {
+      // clang-format on
       return 0;
     }
 
-    var ptr = __js2python_get_ptr(result);
+    let ptr = __js2python_get_ptr(result);
     if (max_code_point > 0xffff) {
       ptr = ptr / 4;
-      for (var i = 0, j = 0; j < length; i++, j++) {
-        var code_point = value.codePointAt(i);
+      for (let i = 0, j = 0; j < length; i++, j++) {
+        let code_point = value.codePointAt(i);
         Module.HEAPU32[ptr + j] = code_point;
         if (code_point > 0xffff) {
           i++;
@@ -118,11 +114,11 @@ EM_JS(PyObject*, __js2python, (JsRef id), {
       }
     } else if (max_code_point > 0xff) {
       ptr = ptr / 2;
-      for (var i = 0; i < length; i++) {
+      for (let i = 0; i < length; i++) {
         Module.HEAPU16[ptr + i] = value.codePointAt(i);
       }
     } else {
-      for (var i = 0; i < length; i++) {
+      for (let i = 0; i < length; i++) {
         Module.HEAPU8[ptr + i] = value.codePointAt(i);
       }
     }
@@ -130,12 +126,9 @@ EM_JS(PyObject*, __js2python, (JsRef id), {
     return result;
   }
 
-  // From https://stackoverflow.com/a/45496068
-  function is_error(value) { return value && value.stack && value.message; }
-
   // clang-format off
-  var value = Module.hiwire.get_value(id);
-  var type = typeof value;
+  let value = Module.hiwire.get_value(id);
+  let type = typeof value;
   if (type === 'string') {
     return __js2python_string(value);
   } else if (type === 'number') {
@@ -147,11 +140,9 @@ EM_JS(PyObject*, __js2python, (JsRef id), {
   } else if (value === false) {
     return __js2python_false();
   } else if (Module.PyProxy.isPyProxy(value)) {
-    return __js2python_pyproxy(Module.PyProxy.getPtr(value));
+    return __js2python_pyproxy(Module.PyProxy._getPtr(value));
   } else if (value['byteLength'] !== undefined) {
     return __js2python_memoryview(id);
-  } else if (is_error(value)) {
-    return __js2python_error(id);
   } else {
     return __js2python_jsproxy(id);
   }

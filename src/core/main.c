@@ -1,12 +1,14 @@
-#include <Python.h>
+#define PY_SSIZE_T_CLEAN
+#include "Python.h"
 #include <assert.h>
 #include <emscripten.h>
 #include <stdalign.h>
 
+#include "error_handling.h"
 #include "hiwire.h"
 #include "js2python.h"
-#include "jsimport.h"
 #include "jsproxy.h"
+#include "keyboard_interrupt.h"
 #include "pyproxy.h"
 #include "python2js.h"
 #include "runpython.h"
@@ -21,57 +23,98 @@ PyInit__RobotRaconteurPython(void);
       printf("Error was triggered by Python exception:\n");                    \
       PyErr_Print();                                                           \
     }                                                                          \
+    return -1;                                                                 \
   } while (0)
+
+#define FAIL_IF_STATUS_EXCEPTION(status)                                       \
+  if (PyStatus_Exception(status)) {                                            \
+    goto finally;                                                              \
+  }
 
 #define TRY_INIT(mod)                                                          \
   do {                                                                         \
     if (mod##_init()) {                                                        \
       FATAL_ERROR("Failed to initialize module %s.\n", #mod);                  \
-      return 1;                                                                \
     }                                                                          \
   } while (0)
+
+// Initialize python. exit() and print message to stderr on failure.
+static void
+initialize_python()
+{
+  bool success = false;
+  PyStatus status;
+  PyConfig config;
+  PyConfig_InitPythonConfig(&config);
+  status = PyConfig_SetBytesString(&config, &config.home, "/");
+  FAIL_IF_STATUS_EXCEPTION(status);
+  config.write_bytecode = false;
+  config.install_signal_handlers = false;
+  status = Py_InitializeFromConfig(&config);
+  FAIL_IF_STATUS_EXCEPTION(status);
+
+  success = true;
+finally:
+  PyConfig_Clear(&config);
+  if (!success) {
+    // This will exit().
+    Py_ExitStatusException(status);
+  }
+}
+#define TRY_INIT_WITH_CORE_MODULE(mod)                                         \
+  do {                                                                         \
+    if (mod##_init(core_module)) {                                             \
+      FATAL_ERROR("Failed to initialize module %s.\n", #mod);                  \
+    }                                                                          \
+  } while (0)
+
+static struct PyModuleDef core_module_def = {
+  PyModuleDef_HEAD_INIT,
+  .m_name = "_pyodide_core",
+  .m_doc = "Pyodide C builtins",
+  .m_size = -1,
+};
 
 int
 main(int argc, char** argv)
 {
+  PyImport_AppendInittab("_RobotRaconteurPython",PyInit__RobotRaconteurPython);
+  // This exits and prints a message to stderr on failure,
+  // no status code to check.
+  initialize_python();
+
   if (alignof(JsRef) != alignof(int)) {
     FATAL_ERROR("JsRef doesn't have the same alignment as int.");
   }
   if (sizeof(JsRef) != sizeof(int)) {
     FATAL_ERROR("JsRef doesn't have the same size as int.");
   }
+
+  PyObject* core_module = NULL;
+  core_module = PyModule_Create(&core_module_def);
+  if (core_module == NULL) {
+    FATAL_ERROR("Failed to create core module.");
+  }
+
   TRY_INIT(hiwire);
-
-  setenv("PYTHONHOME", "/", 0);
-
-  PyImport_AppendInittab("_RobotRaconteurPython",PyInit__RobotRaconteurPython);
-
-  Py_InitializeEx(0);
-
-  // This doesn't seem to work anymore, but I'm keeping it for good measure
-  // anyway The effective way to turn this off is below: setting
-  // sys.dont_write_bytecode = True
-  setenv("PYTHONDONTWRITEBYTECODE", "1", 0);
-
-  PyObject* sys = PyImport_ImportModule("sys");
-  if (sys == NULL) {
-    FATAL_ERROR("Failed to import sys module.");
-    return 1;
-  }
-  if (PyObject_SetAttrString(sys, "dont_write_bytecode", Py_True)) {
-    FATAL_ERROR("Failed to set attribute on sys module.");
-    return 1;
-  }
-  Py_DECREF(sys);
-
+  TRY_INIT(error_handling);
   TRY_INIT(js2python);
-  TRY_INIT(JsImport);
-  TRY_INIT(JsProxy);
+  TRY_INIT_WITH_CORE_MODULE(JsProxy); // JsProxy needs to be before JsImport
   TRY_INIT(pyproxy);
   TRY_INIT(python2js);
-  TRY_INIT(runpython);
-  printf("Python initialization complete\n");
+  TRY_INIT(keyboard_interrupt);
 
+  PyObject* module_dict = PyImport_GetModuleDict(); // borrowed
+  if (PyDict_SetItemString(module_dict, "_pyodide_core", core_module)) {
+    FATAL_ERROR("Failed to add '_pyodide_core' module to modules dict.");
+  }
+
+  // pyodide.py imported for these two.
+  // They should appear last so that core_module is ready.
+  TRY_INIT(runpython);
+
+  Py_CLEAR(core_module);
+  printf("Python initialization complete\n");
   emscripten_exit_with_live_runtime();
   return 0;
 }

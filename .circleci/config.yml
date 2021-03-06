@@ -3,7 +3,7 @@ version: 2
 defaults: &defaults
   working_directory: ~/repo
   docker:
-    - image: iodide/pyodide-env:10
+    - image: iodide/pyodide-env:11
   environment:
     - EMSDK_NUM_CORES: 4
       EMCC_CORES: 4
@@ -81,6 +81,12 @@ jobs:
           paths:
             - ~/.ccache
           key: -{{ checksum "Makefile.envs" }}-v20201205-{{ .BuildNum }}
+
+      - run:
+          name: Clean up workspace
+          command: |
+            rm -rf cpython/{build,downloads}
+            rm -rf emsdk/emsdk/binaryen
 
       - persist_to_workspace:
           root: .

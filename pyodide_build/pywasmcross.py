@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 """Helper for cross-compiling distutils-based Python extensions.
 
 distutils has never had a proper cross-compilation story. This is a hack, which
@@ -42,6 +41,13 @@ from pyodide_build import common
 
 TOOLSDIR = common.TOOLSDIR
 symlinks = set(["cc", "c++", "ld", "ar", "gcc", "gfortran"])
+
+
+class EnvironmentRewritingArgument(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        for e_name, e_value in os.environ.items():
+            values = values.replace(f"$({e_name})", e_value)
+        setattr(namespace, self.dest, values)
 
 
 def collect_args(basename):
@@ -204,12 +210,19 @@ def handle_command(line, args, dryrun=False):
     --------
 
     >>> from collections import namedtuple
-    >>> Args = namedtuple('args', ['cflags', 'cxxflags', 'ldflags', 'host'])
-    >>> args = Args(cflags='', cxxflags='', ldflags='', host='')
+    >>> Args = namedtuple('args', ['cflags', 'cxxflags', 'ldflags', 'host','replace_libs','install_dir'])
+    >>> args = Args(cflags='', cxxflags='', ldflags='', host='',replace_libs='',install_dir='')
     >>> handle_command(['gcc', 'test.c'], args, dryrun=True)
     emcc test.c
     ['emcc', 'test.c']
     """
+    # some libraries have different names on wasm e.g. png16 = png
+    replace_libs = {}
+    for l in args.replace_libs.split(";"):
+        if len(l) > 0:
+            from_lib, to_lib = l.split("=")
+            replace_libs[from_lib] = to_lib
+
     # This is a special case to skip the compilation tests in numpy that aren't
     # actually part of the build
     for arg in line:
@@ -262,6 +275,10 @@ def handle_command(line, args, dryrun=False):
         # Don't include any system directories
         if arg.startswith("-L/usr"):
             continue
+        if arg.startswith("-l"):
+            if arg[2:] in replace_libs:
+                arg = "-l" + replace_libs[arg[2:]]
+
         # threading is disabled for now
         if arg == "-pthread":
             continue
@@ -271,15 +288,12 @@ def handle_command(line, args, dryrun=False):
         # The native build is possibly multithreaded, but the emscripten one
         # definitely isn't
         arg = re.sub(r"/python([0-9]\.[0-9]+)m", r"/python\1", arg)
-        if arg.endswith(".o"):
-            arg = arg[:-2] + ".bc"
-            output = arg
-        elif arg.endswith(".so"):
+        if arg.endswith(".so"):
             arg = arg[:-3] + ".wasm"
             output = arg
 
         # Fix for scipy to link to the correct BLAS/LAPACK files
-        if arg.startswith("-L") and "CLAPACK-WA" in arg:
+        if arg.startswith("-L") and "CLAPACK" in arg:
             out_idx = line.index("-o")
             out_idx += 1
             module_name = line[out_idx]
@@ -322,7 +336,11 @@ def handle_command(line, args, dryrun=False):
             continue
 
         # See https://github.com/emscripten-core/emscripten/issues/8650
-        if arg in ["-lfreetype", "-lz", "-lpng16", "-lgfortran"]:
+        if arg in ["-lfreetype", "-lz", "-lpng", "-lgfortran"]:
+            continue
+        # don't use -shared, SIDE_MODULE is already used
+        # and -shared breaks it
+        if arg in ["-shared"]:
             continue
 
         new_args.append(arg)
@@ -419,6 +437,7 @@ def make_parser(parser):
             nargs="?",
             default=common.DEFAULTCFLAGS,
             help="Extra compiling flags",
+            action=EnvironmentRewritingArgument,
         )
         parser.add_argument(
             "--cxxflags",
@@ -426,6 +445,7 @@ def make_parser(parser):
             nargs="?",
             default=common.DEFAULTCXXFLAGS,
             help="Extra C++ specific compiling flags",
+            action=EnvironmentRewritingArgument,
         )
         parser.add_argument(
             "--ldflags",
@@ -433,6 +453,7 @@ def make_parser(parser):
             nargs="?",
             default=common.DEFAULTLDFLAGS,
             help="Extra linking flags",
+            action=EnvironmentRewritingArgument,
         )
         parser.add_argument(
             "--target",
@@ -451,6 +472,14 @@ def make_parser(parser):
                 "default. Set to 'skip' to skip installation. Installation is "
                 "needed if you want to build other packages that depend on this one."
             ),
+        )
+        parser.add_argument(
+            "--replace-libs",
+            type=str,
+            nargs="?",
+            default="",
+            help="Libraries to replace in final link",
+            action=EnvironmentRewritingArgument,
         )
     return parser
 
