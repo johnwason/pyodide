@@ -1,5 +1,5 @@
---- a/emsdk/emscripten/tag-1.38.31/src/library_websocket.js
-+++ b/emsdk/emscripten/tag-1.38.31/src/library_websocket.js
+--- a/emsdk/fastcomp/emscripten/src/library_websocket.js
++++ b/emsdk/fastcomp/emscripten/src/library_websocket.js
 @@ -272,7 +272,7 @@
  
      // TODO: protocols
