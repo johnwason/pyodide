@@ -12,6 +12,23 @@ typedef int errcode;
 int
 error_handling_init();
 
+extern PyObject* internal_error;
+
+/**
+ * Raised when conversion between Javascript and Python fails.
+ */
+extern PyObject* conversion_error;
+
+JsRef
+wrap_exception(bool attach_python_error);
+
+/**
+ * Convert the active Python exception into a Javascript Error object and print
+ * it to the console.
+ */
+void
+pythonexc2js();
+
 errcode
 log_error(char* msg);
 
@@ -20,7 +37,8 @@ log_error(char* msg);
 errcode
 log_error_obj(JsRef obj);
 
-/** EM_JS Wrappers
+/**
+ * EM_JS Wrappers
  * Wrap EM_JS so that it produces functions that follow the Python return
  * conventions. We catch javascript errors and proxy them and use
  * `PyErr_SetObject` to hand them off to python. We need two variants, one
@@ -65,7 +83,7 @@ log_error_obj(JsRef obj);
     try    /* intentionally no braces, body already has them */                \
       body /* <== body of func */                                              \
     catch (e) {                                                                \
-        LOG_EM_JS_ERROR(func_name, e);                                       \
+        LOG_EM_JS_ERROR(func_name, e);                                         \
         Module.handle_js_error(e);                                             \
         return 0;                                                              \
     }                                                                          \
@@ -88,7 +106,8 @@ log_error_obj(JsRef obj);
   })
 // clang-format on
 
-/** Failure Macros
+/**
+ * Failure Macros
  * These macros are intended to help make error handling as uniform and
  * unobtrusive as possible. The EM_JS wrappers above make it so that the
  * EM_JS calls behave just like Python API calls when it comes to errors

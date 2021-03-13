@@ -31,8 +31,8 @@ LDFLAGS=\
 	$(OPTFLAGS) \
 	-s MODULARIZE=1 \
 	$(CPYTHONROOT)/installs/python-$(PYVERSION)/lib/libpython$(PYMINOR).a \
-	-s TOTAL_MEMORY=10485760 \
-	-s ALLOW_MEMORY_GROWTH=1 \
+	-s TOTAL_MEMORY=104857600 \
+	-s ALLOW_MEMORY_GROWTH=0 \
 	-s MAIN_MODULE=1 \
 	-s EMULATE_FUNCTION_POINTER_CASTS=1 \
 	-s LINKABLE=1 \
@@ -80,7 +80,6 @@ build/pyodide.asm.js: \
 	src/core/pyproxy.o \
 	src/core/python2js_buffer.o \
 	src/core/python2js.o \
-	src/core/runpython.o \
 	src/pystone.py \
 	src/_testcapi.py \
 	src/webbrowser.py \

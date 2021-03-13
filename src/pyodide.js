@@ -2,7 +2,8 @@
  * The main bootstrap script for loading pyodide.
  */
 
-globalThis.languagePluginLoader = new Promise((resolve, reject) => {
+globalThis.languagePluginLoader = (async () => {
+  let Module = {};
   // Note: PYODIDE_BASE_URL is an environement variable replaced in
   // in this template in the Makefile. It's recommended to always set
   // languagePluginUrl in any case.
@@ -27,49 +28,6 @@ globalThis.languagePluginLoader = new Promise((resolve, reject) => {
     }
   };
 
-  // clang-format off
-  let preloadWasm = () => {
-    // On Chrome, we have to instantiate wasm asynchronously. Since that
-    // can't be done synchronously within the call to dlopen, we instantiate
-    // every .so that comes our way up front, caching it in the
-    // `preloadedWasm` dictionary.
-
-    let promise = new Promise((resolve) => resolve());
-    let FS = pyodide._module.FS;
-
-    function recurseDir(rootpath) {
-      let dirs;
-      try {
-        dirs = FS.readdir(rootpath);
-      } catch {
-        return;
-      }
-      for (let entry of dirs) {
-        if (entry.startsWith('.')) {
-          continue;
-        }
-        const path = rootpath + entry;
-        if (entry.endsWith('.so')) {
-          if (Module['preloadedWasm'][path] === undefined) {
-            promise = promise
-              .then(() => Module['loadWebAssemblyModule'](
-                FS.readFile(path), {loadAsync: true}))
-              .then((module) => {
-                Module['preloadedWasm'][path] = module;
-              });
-          }
-        } else if (FS.isDir(FS.lookupPath(path).node.mode)) {
-          recurseDir(path + '/');
-        }
-      }
-    }
-
-    recurseDir('/');
-
-    return promise;
-  }
-  // clang-format on
-
   let loadScript;
   if (self.document) { // browser
     loadScript = (url) => new Promise((res, rej) => {
@@ -87,9 +45,11 @@ globalThis.languagePluginLoader = new Promise((resolve, reject) => {
     throw new Error("Cannot determine runtime environment");
   }
 
-  function recursiveDependencies(names, _messageCallback, errorCallback) {
+  function recursiveDependencies(names, _messageCallback, errorCallback,
+                                 sharedLibsOnly) {
     const packages = self.pyodide._module.packages.dependencies;
     const loadedPackages = self.pyodide.loadedPackages;
+    const sharedLibraries = self.pyodide._module.packages.shared_library;
     const toLoad = new Map();
 
     const addPackage = (pkg) => {
@@ -122,6 +82,15 @@ globalThis.languagePluginLoader = new Promise((resolve, reject) => {
         errorCallback(`Skipping unknown package '${name}'`);
       }
     }
+    if (sharedLibsOnly) {
+      onlySharedLibs = new Map();
+      for (let c of toLoad) {
+        if (c[0] in sharedLibraries) {
+          onlySharedLibs.set(c[0], toLoad.get(c[0]));
+        }
+      }
+      return onlySharedLibs;
+    }
     return toLoad;
   }
 
@@ -131,7 +100,7 @@ globalThis.languagePluginLoader = new Promise((resolve, reject) => {
 
     // locateFile is the function used by the .js file to locate the .data
     // file given the filename
-    self.pyodide._module.locateFile = (path) => {
+    Module.locateFile = (path) => {
       // handle packages loaded from custom URLs
       let pkg = path.replace(/\.data$/, "");
       if (toLoad.has(pkg)) {
@@ -207,7 +176,7 @@ globalThis.languagePluginLoader = new Promise((resolve, reject) => {
     // no pending runDependencies.
     function waitRunDependency() {
       const promise = new Promise(r => {
-        self.pyodide._module.monitorRunDependencies = (n) => {
+        Module.monitorRunDependencies = (n) => {
           if (n === 0) {
             r();
           }
@@ -216,8 +185,8 @@ globalThis.languagePluginLoader = new Promise((resolve, reject) => {
       // If there are no pending dependencies left, monitorRunDependencies will
       // never be called. Since we can't check the number of dependencies,
       // manually trigger a call.
-      self.pyodide._module.addRunDependency("dummy");
-      self.pyodide._module.removeRunDependency("dummy");
+      Module.addRunDependency("dummy");
+      Module.removeRunDependency("dummy");
       return promise;
     }
 
@@ -228,7 +197,7 @@ globalThis.languagePluginLoader = new Promise((resolve, reject) => {
     try {
       await Promise.race([ successPromise, windowErrorPromise ]);
     } finally {
-      delete self.pyodide._module.monitorRunDependencies;
+      delete Module.monitorRunDependencies;
       if (windowErrorHandler) {
         self.removeEventListener('error', windowErrorHandler);
       }
@@ -248,26 +217,101 @@ globalThis.languagePluginLoader = new Promise((resolve, reject) => {
       resolveMsg = 'No packages loaded';
     }
 
-    if (!isFirefox) {
-      await preloadWasm();
-    }
+    Module.reportUndefinedSymbols();
+
     messageCallback(resolveMsg);
 
     // We have to invalidate Python's import caches, or it won't
     // see the new files.
-    self.pyodide.runPython('import importlib as _importlib\n' +
-                           '_importlib.invalidate_caches()\n');
+    Module.runPythonSimple('import importlib\n' +
+                           'importlib.invalidate_caches()\n');
   };
 
   // This is a promise that is resolved iff there are no pending package loads.
   // It never fails.
   let loadPackageChain = Promise.resolve();
 
-  async function loadPackage(names, messageCallback, errorCallback) {
+  /**
+   * @type {object}
+   *
+   * Use ``Object.keys(pyodide.loadedPackages)`` to get the list of names of
+   * loaded packages, and ``pyodide.loadedPackages[package_name]`` to access
+   * install location for a particular ``package_name``.
+   */
+  Module.loadedPackages = {};
+
+  /**
+   * Load a package or a list of packages over the network.
+   * This makes the files for the package available in the virtual filesystem.
+   * The package needs to be imported from Python before it can be used.
+   * @param {String | Array} names package name, or URL. Can be either a single
+   * element, or an array
+   * @param {function} messageCallback A callback, called with progress messages
+   * (optional)
+   * @param {function} errorCallback A callback, called with error/warning
+   * messages (optional)
+   * @returns {Promise} Resolves to ``undefined`` when loading is complete
+   */
+  Module.loadPackage =
+      async function(names, messageCallback, errorCallback) {
     if (!Array.isArray(names)) {
       names = [ names ];
     }
+    // get shared library packages and load those first
+    // otherwise bad things happen with linking them in firefox.
+    sharedLibraryNames = [];
+    try {
+      sharedLibraryPackagesToLoad =
+          recursiveDependencies(names, messageCallback, errorCallback, true);
+      for (pkg of sharedLibraryPackagesToLoad) {
+        sharedLibraryNames.push(pkg[0]);
+      }
+    } catch (e) {
+      // do nothing - let the main load throw any errors
+    }
+    // override the load plugin so that it imports any dlls also
+    // this only needs to be done for shared library packages because
+    // we assume that if a package depends on a shared library
+    // it needs to have access to it.
+    // not needed for so in standard module because those are linked together
+    // correctly, it is only where linking goes across modules that it needs to
+    // be done. Hence we only put this extra preload plugin in during the shared
+    // library load
+    let oldPlugin;
+    for (let p in Module.preloadPlugins) {
+      if (Module.preloadPlugins[p].canHandle("test.so")) {
+        oldPlugin = Module.preloadPlugins[p];
+        break;
+      }
+    }
+    let dynamicLoadHandler = {
+      get : function(obj, prop) {
+        if (prop === 'handle') {
+          return function(bytes, name) {
+            obj[prop].apply(obj, arguments);
+            this["asyncWasmLoadPromise"] =
+                this["asyncWasmLoadPromise"].then(function() {
+                  Module.loadDynamicLibrary(name,
+                                            {global : true, nodelete : true})
+                });
+          }
+        } else {
+          return obj[prop];
+        }
+      }
+    };
+    var loadPluginOverride = new Proxy(oldPlugin, dynamicLoadHandler);
+    // restore the preload plugin
+    Module.preloadPlugins.unshift(loadPluginOverride);
+
     let promise = loadPackageChain.then(
+        () => _loadPackage(sharedLibraryNames, messageCallback || console.log,
+                           errorCallback || console.error));
+    loadPackageChain = loadPackageChain.then(() => promise.catch(() => {}));
+    await promise;
+    Module.preloadPlugins.shift(loadPluginOverride);
+
+    promise = loadPackageChain.then(
         () => _loadPackage(names, messageCallback || console.log,
                            errorCallback || console.error));
     loadPackageChain = loadPackageChain.then(() => promise.catch(() => {}));
@@ -298,12 +342,13 @@ globalThis.languagePluginLoader = new Promise((resolve, reject) => {
     if (recursionLimit > 1000) {
       recursionLimit = 1000;
     }
-    pyodide.runPython(
+    pyodide.runPythonSimple(
         `import sys; sys.setrecursionlimit(int(${recursionLimit}))`);
   };
 
   ////////////////////////////////////////////////////////////
   // Rearrange namespace for public API
+  // clang-format off
   let PUBLIC_API = [
     'globals',
     'loadPackage',
@@ -316,7 +361,9 @@ globalThis.languagePluginLoader = new Promise((resolve, reject) => {
     'registerJsModule',
     'unregisterJsModule',
     'setInterruptBuffer',
+    'pyodide_py'
   ];
+  // clang-format on
 
   function makePublicAPI(module, public_api) {
     let namespace = {_module : module};
@@ -329,15 +376,17 @@ globalThis.languagePluginLoader = new Promise((resolve, reject) => {
 
   ////////////////////////////////////////////////////////////
   // Loading Pyodide
-  let Module = {};
   self.Module = Module;
 
   Module.noImageDecoding = true;
   Module.noAudioDecoding = true;
-  Module.noWasmDecoding = true;
+  Module.noWasmDecoding =
+      false; // we preload wasm using the built in plugin now
   Module.preloadedWasm = {};
-  let isFirefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1;
 
+  let fatal_error_msg =
+      "Pyodide has suffered a fatal error, refresh the page. " +
+      "Please report this to the Pyodide maintainers.";
   Module.fatal_error = function(e) {
     for (let [key, value] of Object.entries(Module.public_api)) {
       if (key.startsWith("_")) {
@@ -350,50 +399,169 @@ globalThis.languagePluginLoader = new Promise((resolve, reject) => {
         continue;
       }
       if (typeof (value) === "function") {
-        Module.public_api[key] = function() {
-          throw Error("Pyodide has suffered a fatal error, refresh the page. " +
-                      "Please report this to the Pyodide maintainers.");
-        }
+        Module.public_api[key] = function() { throw Error(fatal_error_msg); }
       }
     }
+    console.error(fatal_error_msg);
+    console.error("The cause of the fatal error was:\n", e);
     throw e;
   };
 
-  Module.runPython = code => Module.pyodide_py.eval_code(code, Module.globals);
+  /**
+   * @member {PyProxy} pyodide_py
+   * An alias to the Python pyodide package.
+   */
+
+  /**
+   * @member {PyProxy} globals
+   * An alias to the global Python namespace.
+   *
+   * An object whose attributes are members of the Python global namespace. This
+   * is an alternative to :meth:`pyimport`. For example, to access the ``foo``
+   * Python object from Javascript use
+   * ``pyodide.globals.get("foo")``
+   */
+
+  /**
+   * @member {string} version
+   * The pyodide version.
+   *
+   * It can be either the exact release version (e.g. `0.1.0`), or
+   * the latest release version followed by the number of commits since, and
+   * the git hash of the current commit (e.g. `0.1.0-1-bd84646`).
+   */
+
+  /**
+   * Runs a string of Python code from Javascript.
+   *
+   * The last part of the string may be an expression, in which case, its value
+   * is returned.
+   *
+   * @param {string} code Python code to evaluate
+   * @returns The result of the python code converted to Javascript
+   */
+  Module.runPython = function(code, globals = Module.globals) {
+    return Module.pyodide_py.eval_code(code, globals);
+  };
 
   // clang-format off
+  /**
+   * Inspect a Python code block and use ``pyodide.loadPackage` to load any known 
+   * packages that the code imports. Uses 
+   * :func:`pyodide_py.find_imports <pyodide.find\_imports>` to inspect the code.
+
+   * For example, given the following code as input
+   * 
+   * .. code-block:: python
+   * 
+   *    import numpy as np
+   *    x = np.array([1, 2, 3])
+   * 
+   * :js:func:`loadPackagesFromImports` will call ``pyodide.loadPackage(['numpy'])``.
+   * See also :js:func:`runPythonAsync`.
+   *
+   * @param {*} code 
+   * @param {*} messageCallback 
+   * @param {*} errorCallback 
+   */
   Module.loadPackagesFromImports  = async function(code, messageCallback, errorCallback) {
-    let imports = Module.pyodide_py.find_imports(code).deepCopyToJavascript();
+    let imports = Module.pyodide_py.find_imports(code).toJs();
     if (imports.length === 0) {
       return;
     }
-    let packageNames =
-        self.pyodide._module.packages.import_name_to_package_name;
+    let packageNames = Module.packages.import_name_to_package_name;
     let packages = new Set();
     for (let name of imports) {
       if (name in packageNames) {
-        packages.add(name);
+        packages.add(packageNames[name]);
       }
     }
     if (packages.size) {
-      await loadPackage(
+      await Module.loadPackage(
         Array.from(packages.keys()), messageCallback, errorCallback
       );
     }
   };
   // clang-format on
 
-  Module.pyimport = name => Module.globals[name];
+  /**
+   * Access a Python object in the global namespace from Javascript.
+   * @param {string} name Python variable name
+   * @returns If the Python object is an immutable type (string, number,
+   * boolean), it is converted to Javascript and returned.  For other types, a
+   * `PyProxy` object is returned.
+   */
+  Module.pyimport = name => Module.globals.get(name);
 
+  /**
+   * Runs Python code, possibly asynchronously loading any known packages that
+   * the code imports. For example, given the following code
+   *
+   * .. code-block:: python
+   *
+   *    import numpy as np
+   *    x = np.array([1, 2, 3])
+   *
+   * pyodide will first call `pyodide.loadPackage(['numpy'])`, and then run the
+   * code, returning the result. Since package fetching must happen
+   * asynchronously, this function returns a `Promise` which resolves to the
+   * output. For example:
+   *
+   * .. code-block:: javascript
+   *
+   *    pyodide.runPythonAsync(code, messageCallback)
+   *           .then((output) => handleOutput(output))
+   *
+   * @param {string} code Python code to evaluate
+   * @param {Function} messageCallback A callback, called with progress
+   * messages. (optional)
+   * @param {Function} errorCallback A callback, called with error/warning
+   * messages. (optional)
+   */
   Module.runPythonAsync = async function(code, messageCallback, errorCallback) {
     await Module.loadPackagesFromImports(code, messageCallback, errorCallback);
-    return Module.runPython(code);
+    let coroutine = Module.pyodide_py.eval_code_async(code, Module.globals);
+    try {
+      let result = await coroutine;
+      return result;
+    } finally {
+      coroutine.destroy();
+    }
   };
 
-  Module.registerJsModule = function(
-      name, module) { Module.pyodide_py.register_js_module(name, module); };
-  Module.unregisterJsModule = function(
-      name) { Module.pyodide_py.unregister_js_module(name); };
+  // clang-format off
+  /**
+   * Registers the Js object ``module`` as a Js module with ``name``.
+   * This module can then be imported from Python using the standard Python
+   * import system. If another module by the same name has already been
+   * imported, this won't have much effect unless you also delete the imported
+   * module from
+   * ``sys.modules``. This calls the ``pyodide_py`` api
+   * :func:`pyodide.register_js_module`.
+   *
+   * @param {string} name Name of js module to add
+   * @param {object} module Javascript object backing the module
+   */
+  // clang-format off
+  Module.registerJsModule = function(name, module) { 
+    Module.pyodide_py.register_js_module(name, module); 
+  };
+
+  /**
+   * Unregisters a Js module with given name that has been previously registered
+   * with :js:func:`registerJsModule` or :func:`pyodide.register_js_module`. If
+   * a Js module with that name does not already exist, will throw an error.
+   * Note that if the module has already been imported, this won't have much
+   * effect unless you also delete the imported module from ``sys.modules``.
+   * This calls the
+   * ``pyodide_py`` api :func:`pyodide.unregister_js_module`.
+   *
+   * @param {string} name Name of js module to remove
+   */
+  Module.unregisterJsModule = function(name) { 
+    Module.pyodide_py.unregister_js_module(name); 
+  };
+  // clang-format on
 
   Module.function_supports_kwargs = function(funcstr) {
     // This is basically a finite state machine (except for paren counting)
@@ -485,27 +653,50 @@ globalThis.languagePluginLoader = new Promise((resolve, reject) => {
   };
 
   Module.locateFile = (path) => baseURL + path;
-  Module.postRun = async () => {
-    Module.version = Module.pyodide_py.__version__;
-    delete self.Module;
-    let response = await fetch(`${baseURL}packages.json`);
-    let json = await response.json();
-    fixRecursionLimit(self.pyodide);
-    self.pyodide = makePublicAPI(self.pyodide, PUBLIC_API);
-    self.pyodide.registerJsModule("js", globalThis);
-    self.pyodide.registerJsModule("pyodide_js", self.pyodide);
-    self.pyodide._module.packages = json;
-    resolve();
-  };
+
+  let moduleLoaded = new Promise(r => Module.postRun = r);
 
   const scriptSrc = `${baseURL}pyodide.asm.js`;
-  loadScript(scriptSrc).then(() => {
-    // The emscripten module needs to be at this location for the core
-    // filesystem to install itself. Once that's complete, it will be replaced
-    // by the call to `makePublicAPI` with a more limited public API.
-    self.pyodide = pyodide(Module);
-    self.pyodide.loadedPackages = {};
-    self.pyodide.loadPackage = loadPackage;
-  });
-});
+
+  await loadScript(scriptSrc);
+
+  // The emscripten module needs to be at this location for the core
+  // filesystem to install itself. Once that's complete, it will be replaced
+  // by the call to `makePublicAPI` with a more limited public API.
+  self.pyodide = await pyodide(Module);
+
+  // There is some work to be done between the module being "ready" and postRun
+  // being called.
+  await moduleLoaded;
+
+  // Unfortunately the indentation here matters.
+  Module.runPythonSimple(`
+def temp(Module):
+  import pyodide
+  import __main__
+  import builtins
+
+  globals = __main__.__dict__
+  globals.update(builtins.__dict__)
+
+  Module.version = pyodide.__version__
+  Module.globals = globals
+  Module.builtins = builtins.__dict__
+  Module.pyodide_py = pyodide
+`);
+  Module.init_dict.get("temp")(Module);
+
+  // Wrap "globals" in a special Proxy that allows `pyodide.globals.x` access.
+  // TODO: Should we have this?
+  Module.globals = Module.wrapNamespace(Module.globals);
+
+  delete self.Module;
+  let response = await fetch(`${baseURL}packages.json`);
+  Module.packages = await response.json();
+
+  fixRecursionLimit(self.pyodide);
+  self.pyodide = makePublicAPI(self.pyodide, PUBLIC_API);
+  self.pyodide.registerJsModule("js", globalThis);
+  self.pyodide.registerJsModule("pyodide_js", self.pyodide);
+})();
 languagePluginLoader

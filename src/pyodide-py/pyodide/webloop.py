@@ -136,12 +136,12 @@ class WebLoop(asyncio.AbstractEventLoop):
 
         This uses `setTimeout(callback, delay)`
         """
-        from js import setTimeout
+        from js import pyodide_set_timeout
 
         if delay < 0:
             raise ValueError("Can't schedule in the past")
         h = asyncio.Handle(callback, args, self, context=context)
-        setTimeout(h._run, delay * 1000)
+        pyodide_set_timeout(h._run, delay * 1000)
         return h
 
     def call_at(
