@@ -152,7 +152,6 @@ def get_bash_runner():
             "WASM_PKG_CONFIG_PATH",
             "CARGO_BUILD_TARGET",
             "CARGO_HOME",
-            "CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_LINKER",
             "RUSTFLAGS",
             "PYO3_CONFIG_FILE",
         ]
@@ -450,6 +449,7 @@ def compile(
             ldflags=build_metadata["ldflags"],
             target_install_dir=target_install_dir,
             replace_libs=replace_libs,
+            exports=build_metadata.get("exports", "pyinit"),
         )
 
 
