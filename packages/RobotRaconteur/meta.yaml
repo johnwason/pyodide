@@ -1,9 +1,10 @@
 package:
   name: RobotRaconteur
-  version: 0.15.0
+  version: 0.15.1
 
 source:
-  path: /src/robotraconteur_pyodide
+  url: https://github.com/robotraconteur/robotraconteur_pyodide/archive/refs/tags/v0.15.1-pyodide.tar.gz
+  sha256: eac9f45d23e5497f9ca0b848a699d65478d119379322d35a7e8f2201b112aab7
 
 requirements:
   run:
